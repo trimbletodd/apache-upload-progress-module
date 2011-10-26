@@ -251,6 +251,8 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
       }
     }
     CACHE_UNLOCK();
+
+    //Todd: Add update to redis/memcache here.
     
     return APR_SUCCESS;
 }
