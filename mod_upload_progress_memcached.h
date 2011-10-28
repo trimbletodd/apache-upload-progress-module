@@ -5,12 +5,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+bool file_exists(const char *filename){    
+  FILE *file;
+  if (file = fopen(filename, "r")){
+    fclose(file);        
+    return true;    
+  }
+  return false;
+}
 
 /*
  * Takes the input file, which should define MEMCACHED_SERVERS,
  * and outputs a properly defined config string
  */
 void set_memcache_config_string(char *file, char *config_string){
+  if (!file_exists(file)){
+    sprintf(config_string, "%s", "--SERVER=localhost:11211");
+    return;
+  }
+
   char command[1024];
   FILE *fp;
   int status;
@@ -30,7 +43,6 @@ void set_memcache_config_string(char *file, char *config_string){
   while (fgets(path, sizeof(path)-1, fp) != NULL) {
     sprintf(config_string, "%s", path);
   }
-  sprintf(config_string, "%s", "--SERVER=localhost:11211");
   /* close */
   pclose(fp);
 }
