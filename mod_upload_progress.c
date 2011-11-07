@@ -254,7 +254,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     CACHE_UNLOCK();
 
     //Todd: init memcache connection and update key
-    init_memcache_and_update_key(id, node, file);
+    update_progress_memcache(id, node);
 
     return APR_SUCCESS;
 }

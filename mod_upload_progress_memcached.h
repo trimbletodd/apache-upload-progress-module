@@ -9,7 +9,9 @@
 /* static const memcached_st *memc; */
 // The expiration time of the keys in seconds
 static const uint32_t expiration = 28800;
+static const memcached_st *memcache_inst;
 
+static void node_to_JSON(upload_progress_node_t *node, char *str);
 static memcached_st *init_memcache(char *file);
 static void set_memcache_conn_string(char *file, char *config_string);
 static bool file_exists(const char *filename);
@@ -49,6 +51,20 @@ static memcached_st *init_memcache(char *file){
     printf("ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string);
   }
   return(memc);
+}
+
+/*
+ * Terminates the memcache connection
+ */
+static void free_memcache(){
+  memcached_free(memcache_inst);
+}
+
+/*
+ * updates memcache key with the JSON from the node
+ */
+static void update_progress_memcache(char *upload_id, upload_progress_node_t *node){
+  
 }
 
 /*
