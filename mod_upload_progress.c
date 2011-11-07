@@ -31,6 +31,7 @@
 typedef struct {
   int track_enabled;
   int report_enabled;
+  int memcache_enabled;
 } DirConfig;
 
 
@@ -104,6 +105,10 @@ static const command_rec upload_progress_cmds[] =
                  "Track upload progress in this location"),
     AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Report upload progress in this location"),
+    AP_INIT_FLAG("TrackWithMemcache", (CmdFunc) memcache_track_upload_progress_cmd, NULL, OR_AUTHCFG,
+                 "Track upload progress using MemCache in this location"),
+    AP_INIT_TAKE1("MemcacheServerFile", (CmdFunc) memcache_server_file_cmd, NULL, OR_AUTHCFG,
+                 "File defining MEMCACHE_SERVERS variable containing list of servers in pool"),
     AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
                  "Size of shared memory used to keep uploads data, default 100KB"),
     { NULL }
@@ -210,6 +215,7 @@ upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
     DirConfig* dir = (DirConfig*)apr_pcalloc(p, sizeof(DirConfig));
     dir->report_enabled = 0;
     dir->track_enabled = 0;
+    dir->memcache_enabled = 0;
     return dir;
 }
 
@@ -469,6 +475,8 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 
 static apr_status_t upload_progress_cleanup(void *data)
 {
+  memcache_cleanup();
+
   /* FIXME: this function should use locking because it modifies node data */
   upload_progress_context_t *ctx = (upload_progress_context_t *)data;
   if (ctx->node) {

@@ -37,6 +37,35 @@ static bool file_exists(const char *filename);
 /*   memcached_free(memc); */
 /* } */
 
+/*
+ * This sets the directory config for using memcache to track uploads.
+ * Variable: TrackWithMemcache
+ */
+static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
+{
+    DirConfig* dir = (DirConfig*)config ;
+    dir->memcache_enabled = arg;
+    return NULL;
+}
+
+/*
+ * This sets the file where MEMCACHE_SERVERS is defined.
+ * Variable: MemcacheServerFile
+ */
+static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, const char *arg) {
+    ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+
+    config->memcache_server_file = (apr_size_t)n;
+    return NULL;
+}
+
+static const char *memcache_server_file_cmd(cmd_parms *cmd, void *config, int arg)
+{
+    DirConfig* dir = (DirConfig*)config ;
+    dir->memcache_enabled = arg;
+    return NULL;
+}
+
 
 /*
  * Initializes the memcache connection
