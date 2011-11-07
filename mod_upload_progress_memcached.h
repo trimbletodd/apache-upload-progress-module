@@ -11,9 +11,10 @@
 static const uint32_t expiration = 28800;
 static const memcached_st *memcache_inst;
 
-static void node_to_JSON(upload_progress_node_t *node, char *str);
-static memcached_st *init_memcache(char *file);
-static void set_memcache_conn_string(char *file, char *config_string);
+static void memcache_node_to_JSON(upload_progress_node_t *node, char *str);
+static memcached_st *memcache_init(char *file);
+static memcached_st *memcache_cleanup();
+static void memcache_set_conn_string(char *file, char *config_string);
 static bool file_exists(const char *filename);
 
 /* 
@@ -40,11 +41,11 @@ static bool file_exists(const char *filename);
 /*
  * Initializes the memcache connection
  *
- * Todo: if file doesn't exist/is not readable, throw error?
+ * Todo: if file doesn't exist/is not readable, throw error
  */
-static memcached_st *init_memcache(char *file){
+static memcached_st *memcache_init(char *file){
   char conn_string[1024];
-  set_memcache_conn_string(file, conn_string);
+  memcache_set_conn_string(file, conn_string);
   memcached_st *memc= memcached(conn_string, strlen(conn_string));
   memcached_return_t rc= memcached_version(memc);
   if (rc != MEMCACHED_SUCCESS){
@@ -56,21 +57,21 @@ static memcached_st *init_memcache(char *file){
 /*
  * Terminates the memcache connection
  */
-static void free_memcache(){
+static void memcache_cleanup(){
   memcached_free(memcache_inst);
 }
 
 /*
  * updates memcache key with the JSON from the node
  */
-static void update_progress_memcache(char *upload_id, upload_progress_node_t *node){
+static void memcache_update_progress(char *upload_id, upload_progress_node_t *node){
   
 }
 
 /*
  * Return node data in JSON
  */
-static void node_to_JSON(upload_progress_node_t *node, char *str){
+static void memcache_node_to_JSON(upload_progress_node_t *node, char *str){
   if (node == NULL) {
     sprintf(str, "node undefined in node_to_JSON");
   }else{
@@ -89,7 +90,7 @@ static void node_to_JSON(upload_progress_node_t *node, char *str){
  *
  * Note the dependency on ruby being defined in $PATH.
  */
-static void set_memcache_conn_string(char *file, char *config_string){
+static void memcache_set_conn_string(char *file, char *config_string){
   if (!file_exists(file)){
     sprintf(config_string, "%s", "--SERVER=localhost:11211");
     return;
