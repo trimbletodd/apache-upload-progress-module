@@ -469,15 +469,15 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 
 static apr_status_t upload_progress_cleanup(void *data)
 {
-    /* FIXME: this function should use locking because it modifies node data */
-    upload_progress_context_t *ctx = (upload_progress_context_t *)data;
-    if (ctx->node) {
-	if(ctx->r->status >= HTTP_BAD_REQUEST) 
+  /* FIXME: this function should use locking because it modifies node data */
+  upload_progress_context_t *ctx = (upload_progress_context_t *)data;
+  if (ctx->node) {
+    if(ctx->r->status >= HTTP_BAD_REQUEST) 
 	    ctx->node->err_status = ctx->r->status;
-        ctx->node->expires = time(NULL) + 60; /*expires in 60s */
-        ctx->node->done = 1;
-    }
-    return APR_SUCCESS;
+    ctx->node->expires = time(NULL) + 60; /*expires in 60s */
+    ctx->node->done = 1;
+  }
+  return APR_SUCCESS;
 }
 
 static void clean_old_connections(request_rec *r) {
