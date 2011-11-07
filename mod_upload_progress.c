@@ -4,6 +4,7 @@
 #include <apr_pools.h>
 #include <apr_strings.h>
 #include "unixd.h"
+#include "mod_upload_progress_memcached.h"
 
 #if APR_HAS_SHARED_MEMORY
 #include "apr_rmm.h"
@@ -252,8 +253,9 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     }
     CACHE_UNLOCK();
 
-    //Todd: Add update to redis/memcache here.
-    
+    //Todd: init memcache connection and update key
+    init_memcache_and_update_key(id, node, file);
+
     return APR_SUCCESS;
 }
 
