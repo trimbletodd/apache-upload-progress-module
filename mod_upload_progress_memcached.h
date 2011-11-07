@@ -54,13 +54,18 @@ static memcached_st *init_memcache(char *file){
 /*
  * Return node data in JSON
  */
-/* static char * node_to_JSON(upload_progress_node_s node){ */
-/*   if (node == NULL) { */
-/*     return "node undefined in node_to_JSON"; */
-/*   }else{ */
-    
-/*   } */
-/* } */
+static void node_to_JSON(upload_progress_node_t *node, char *str){
+  if (node == NULL) {
+    sprintf(str, "node undefined in node_to_JSON");
+  }else{
+    sprintf(str, "{\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\"}\n",
+           "state", node->done,
+           "size", node->length,
+           "received", node->received,
+           "speed", node->speed,
+           "started_at", node->started_at);
+  }
+}
 
 /*
  * Takes a ruby input file, which should define MEMCACHED_SERVERS,
