@@ -41,7 +41,7 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *conf
 
 /*
  * This sets the directory config for using memcache to track uploads.
- * Variable: TrackWithMemcache
+ * Variable: UploadProgressUseMemcache
  */
 static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
@@ -53,7 +53,7 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *conf
 /*
  * This sets the file where MEMCACHE_SERVERS is defined.
  * 
- * Variable: MemcacheServerFile
+ * Variable: UploadProgressMemcacheFile
  */
 static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, const char *arg) {
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
