@@ -4,7 +4,6 @@
 #include <apr_pools.h>
 #include <apr_strings.h>
 #include "unixd.h"
-#include "mod_upload_progress_memcached.h"
 
 #if APR_HAS_SHARED_MEMORY
 #include "apr_rmm.h"
@@ -100,6 +99,10 @@ int upload_progress_init(apr_pool_t *, apr_pool_t *, apr_pool_t *, server_rec *)
 //from passenger
 typedef const char * (*CmdFunc)();// Workaround for some weird C++-specific compiler error.
 
+// for mod_upload_progress_memcached.h
+static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg);
+static const char *memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg);
+
 static const command_rec upload_progress_cmds[] =
 {
     AP_INIT_FLAG("TrackUploads", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
@@ -126,6 +129,9 @@ module AP_MODULE_DECLARE_DATA upload_progress_module =
   upload_progress_register_hooks,      /* callback for registering hooks */
 };
 
+// Memcache lib relies on definitions above
+#include "mod_upload_progress_memcached.h"
+
 static void upload_progress_register_hooks (apr_pool_t *p)
 {
   ap_hook_fixups(upload_progress_handle_request, NULL, NULL, APR_HOOK_FIRST);
@@ -137,10 +143,6 @@ static void upload_progress_register_hooks (apr_pool_t *p)
 
 ServerConfig *get_server_config(request_rec *r) {
   return (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
-}
-
-ServerConfig *get_per_dir_config(request_rec *r) {
-  return (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 }
 
 static int upload_progress_handle_request(request_rec *r)
@@ -220,7 +222,6 @@ upload_progress_config_create_dir(apr_pool_t *p, char *dirspec) {
     DirConfig* dir = (DirConfig*)apr_pcalloc(p, sizeof(DirConfig));
     dir->report_enabled = 0;
     dir->track_enabled = 0;
-    dir->memcache_enabled = 0;
     return dir;
 }
 
@@ -481,8 +482,6 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 
 static apr_status_t upload_progress_cleanup(void *data)
 {
-  memcache_cleanup();
-
   /* FIXME: this function should use locking because it modifies node data */
   upload_progress_context_t *ctx = (upload_progress_context_t *)data;
   if (ctx->node) {
@@ -492,6 +491,7 @@ static apr_status_t upload_progress_cleanup(void *data)
     ctx->node->done = 1;
   }
 
+  ServerConfig *config = get_server_config(ctx->r);
   if (config->memcache_enabled){
     memcache_cleanup();
   }

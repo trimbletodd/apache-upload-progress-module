@@ -9,41 +9,20 @@
 /* static const memcached_st *memc; */
 // The expiration time of the keys in seconds
 static const uint32_t expiration = 28800;
-static const memcached_st *memcache_inst;
+static memcached_st *memcache_inst;
 
 static void memcache_node_to_JSON(upload_progress_node_t *node, char *str);
 static memcached_st *memcache_init(char *file);
-static memcached_st *memcache_cleanup();
-static void memcache_set_conn_string(char *file, char *config_string);
+static void memcache_cleanup();
+static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len);
 static bool file_exists(const char *filename);
-static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, const char *arg);
-static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg);
-
-/* 
- * If the key isn't initialized, create the key, otherwise,
- * update the key with the new values of node
- */
-
-/* static void init_memcache_and_update_key(char *id, char *val, char *file){ */
-/*   memcached_return_t rc; */
-/*   memcache_st *memc = init_memcache(file); */
-/*   uint32_t flags=0; */
-/*   char *ret_str; */
-/*   const char *rc_str; */
-
-/*   memc=init_memcache(file); */
-
-/*   rc = memcached_set(memc, id, strlen(id), val, strlen(val), expiration, flags); */
- 
-/*   rc = memcached_exist(memc, id, (size_t) strlen(id)); */
-/*   memcached_free(memc); */
-/* } */
+static void memcache_print_val(char *key, size_t length);
 
 /*
  * This sets the directory config for using memcache to track uploads.
  * Variable: UploadProgressUseMemcache
  */
-static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg){
+static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg){
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
     config->memcache_enabled = arg;
     return NULL;
@@ -54,7 +33,7 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *conf
  * 
  * Variable: UploadProgressMemcacheFile
  */
-static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, const char *arg) {
+static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg) {
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
     config->memcache_server_file = arg;
     return NULL;
@@ -67,14 +46,34 @@ static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, const c
  */
 static memcached_st *memcache_init(char *file){
   char conn_string[1024];
-  memcache_set_conn_string(file, conn_string);
-  memcached_st *memc= memcached(conn_string, strlen(conn_string));
-  memcached_return_t rc= memcached_version(memc);
+  memcache_get_conn_string(file, conn_string, sizeof(conn_string));
+  memcache_inst = memcached(conn_string, strlen(conn_string));
+  if(memcache_inst == NULL){
+    printf("ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string);
+    exit(1);
+  }
+  memcached_return_t rc= memcached_version(memcache_inst);
   if (rc != MEMCACHED_SUCCESS){
     printf("ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string);
   }
-  return(memc);
+  return(memcache_inst);
 }
+
+/*
+ * Primarily used for debugging
+ */
+static void memcache_print_val(char *key, size_t length){
+  size_t return_value_length;
+  char *ret_str;
+  uint32_t flags=0;
+  memcached_return_t rc;
+
+  ret_str = memcached_get(memcache_inst, key, strlen(key), &return_value_length, &flags, &rc);
+  if (rc != MEMCACHED_SUCCESS){printf("ERROR: ");}
+  printf("Get(%s) => %s (rc: %s)\n", key, ret_str, memcached_strerror(memcache_inst, rc));
+
+}
+
 
 /*
  * Terminates the memcache connection
@@ -87,9 +86,17 @@ static void memcache_cleanup(){
  * updates memcache key with the JSON from the node
  */
 static void memcache_update_progress(char *upload_id, upload_progress_node_t *node){
+  memcached_return_t rc;
+  uint32_t flags=0;
+  char *json_str = (char *) malloc(1024);
 
   // Caution, connection may have timed out by the time this is called.
-  
+  memcache_node_to_JSON(node, json_str);
+  /* printf("updating %s: %s\n", upload_id,json_str); */
+  rc = memcached_set(memcache_inst, upload_id, strlen(upload_id), json_str, strlen(json_str), expiration, flags);
+  if (rc != MEMCACHED_SUCCESS){
+    printf("ERROR: upload_id=%s %s", upload_id, memcached_strerror(memcache_inst, rc));
+  }
 }
 
 /*
@@ -99,7 +106,7 @@ static void memcache_node_to_JSON(upload_progress_node_t *node, char *str){
   if (node == NULL) {
     sprintf(str, "node undefined in node_to_JSON");
   }else{
-    sprintf(str, "{\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\"}\n",
+    sprintf(str, "{\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\"}",
            "state", node->done,
            "size", node->length,
            "received", node->received,
@@ -114,7 +121,7 @@ static void memcache_node_to_JSON(upload_progress_node_t *node, char *str){
  *
  * Note the dependency on ruby being defined in $PATH.
  */
-static void memcache_set_conn_string(char *file, char *config_string){
+static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len){
   if (!file_exists(file)){
     sprintf(config_string, "%s", "--SERVER=localhost:11211");
     return;
@@ -122,25 +129,32 @@ static void memcache_set_conn_string(char *file, char *config_string){
 
   char command[1024];
   FILE *fp;
-  int status;
-  char path[1035];
-
+  char path[100];
   /* Build the command to parse the file */
   sprintf(command, "ruby -e \'require \"%s\"; puts MEMCACHED_SERVERS.map{|h| \"--SERVER=#{h}\"}.join(\" \")\' 2> /dev/null", file);
 
   /* Open the command for reading. */
   fp = popen(command, "r");
   if (fp == NULL) {
-    printf("Failed to run command\n" );
-    exit;
+    printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", file, command);
+    exit(1);
   }
 
-  /* Read the output a line at a time - output it. */
-  while (fgets(path, sizeof(path)-1, fp) != NULL) {
-    sprintf(config_string, "%s", path);
-  }
+  fgets(config_string, config_str_len-1, fp);
+  int i=0;
+  while(i<config_str_len){
+    if (config_string[i] == '\n') {
+      config_string[i] = '\0';
+      break;
+    }
+    i++;
+  }      
+
   /* close */
-  pclose(fp);
+  if (pclose(fp) != 0){
+    printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", file, command);
+    exit(1);
+  }
 }
 
 static bool file_exists(const char *filename){    
