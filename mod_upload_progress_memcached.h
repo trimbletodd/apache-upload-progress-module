@@ -87,6 +87,8 @@ static void memcache_cleanup(){
  * updates memcache key with the JSON from the node
  */
 static void memcache_update_progress(char *upload_id, upload_progress_node_t *node){
+
+  // Caution, connection may have timed out by the time this is called.
   
 }
 
