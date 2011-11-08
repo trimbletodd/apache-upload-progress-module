@@ -9,6 +9,7 @@
 /* static const memcached_st *memc; */
 // The expiration time of the keys in seconds
 static const uint32_t expiration = 28800;
+static char *namespace="upload_progress:";
 static memcached_st *memcache_inst;
 
 static void memcache_node_to_JSON(upload_progress_node_t *node, char *str);
@@ -67,13 +68,14 @@ static void memcache_print_val(char *key, size_t length){
   char *ret_str;
   uint32_t flags=0;
   memcached_return_t rc;
+  char key_w_ns[1024];
+  sprintf(key_w_ns, "%s%s", namespace,key);
 
-  ret_str = memcached_get(memcache_inst, key, strlen(key), &return_value_length, &flags, &rc);
+  ret_str = memcached_get(memcache_inst, key_w_ns, strlen(key_w_ns), &return_value_length, &flags, &rc);
   if (rc != MEMCACHED_SUCCESS){printf("ERROR: ");}
-  printf("Get(%s) => %s (rc: %s)\n", key, ret_str, memcached_strerror(memcache_inst, rc));
+  printf("Get(%s) => %s (rc: %s)\n", key_w_ns, ret_str, memcached_strerror(memcache_inst, rc));
 
 }
-
 
 /*
  * Terminates the memcache connection
@@ -84,18 +86,22 @@ static void memcache_cleanup(){
 
 /*
  * updates memcache key with the JSON from the node
+ *
+ * Todo: make this use apr_pcalloc instead of malloc
  */
-static void memcache_update_progress(char *upload_id, upload_progress_node_t *node){
+static void memcache_update_progress(char *key, upload_progress_node_t *node){
   memcached_return_t rc;
   uint32_t flags=0;
   char *json_str = (char *) malloc(1024);
+  char key_w_ns[1024];
+  sprintf(key_w_ns, "%s%s", namespace,key);
 
   // Caution, connection may have timed out by the time this is called.
   memcache_node_to_JSON(node, json_str);
-  /* printf("updating %s: %s\n", upload_id,json_str); */
-  rc = memcached_set(memcache_inst, upload_id, strlen(upload_id), json_str, strlen(json_str), expiration, flags);
+  /* printf("[%s] => %s\n", key_w_ns,json_str); */
+  rc = memcached_set(memcache_inst, key_w_ns, strlen(key_w_ns), json_str, strlen(json_str), expiration, flags);
   if (rc != MEMCACHED_SUCCESS){
-    printf("ERROR: upload_id=%s %s", upload_id, memcached_strerror(memcache_inst, rc));
+    printf("ERROR: key=%s %s", key_w_ns, memcached_strerror(memcache_inst, rc));
   }
 }
 
@@ -107,11 +113,11 @@ static void memcache_node_to_JSON(upload_progress_node_t *node, char *str){
     sprintf(str, "node undefined in node_to_JSON");
   }else{
     sprintf(str, "{\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\"}",
-           "state", node->done,
-           "size", node->length,
-           "received", node->received,
-           "speed", node->speed,
-           "started_at", node->started_at);
+            "state", node->done,
+            "size", node->length,
+            "received", node->received,
+            "speed", node->speed,
+            "started_at", node->started_at);
   }
 }
 
