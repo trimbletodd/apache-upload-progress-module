@@ -264,8 +264,9 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     }
     CACHE_UNLOCK();
 
-    //Todd: init memcache connection and update key
-    update_progress_memcache(id, node);
+    if (config->memcache_enabled){
+      update_progress_memcache(id, node);
+    }
 
     return APR_SUCCESS;
 }
@@ -490,6 +491,11 @@ static apr_status_t upload_progress_cleanup(void *data)
     ctx->node->expires = time(NULL) + 60; /*expires in 60s */
     ctx->node->done = 1;
   }
+
+  if (config->memcache_enabled){
+    memcache_cleanup();
+  }
+
   return APR_SUCCESS;
 }
 
@@ -700,6 +706,9 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
     }
 #endif
 
+    if (config->memcache_enabled){
+      memcache_init(config->memcache_server_file);
+    }
   return(OK);
 }
 
