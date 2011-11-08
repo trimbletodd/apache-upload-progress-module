@@ -16,6 +16,8 @@ static memcached_st *memcache_init(char *file);
 static memcached_st *memcache_cleanup();
 static void memcache_set_conn_string(char *file, char *config_string);
 static bool file_exists(const char *filename);
+static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, const char *arg);
+static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg);
 
 /* 
  * If the key isn't initialized, create the key, otherwise,
@@ -43,29 +45,21 @@ static bool file_exists(const char *filename);
  */
 static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg)
 {
-    DirConfig* dir = (DirConfig*)config ;
-    dir->memcache_enabled = arg;
+    ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+    config->memcache_server_file = arg;
     return NULL;
 }
 
 /*
  * This sets the file where MEMCACHE_SERVERS is defined.
+ * 
  * Variable: MemcacheServerFile
  */
 static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, const char *arg) {
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
-
-    config->memcache_server_file = (apr_size_t)n;
+    config->memcache_server_file = arg;
     return NULL;
 }
-
-static const char *memcache_server_file_cmd(cmd_parms *cmd, void *config, int arg)
-{
-    DirConfig* dir = (DirConfig*)config ;
-    dir->memcache_enabled = arg;
-    return NULL;
-}
-
 
 /*
  * Initializes the memcache connection

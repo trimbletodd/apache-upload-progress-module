@@ -31,7 +31,6 @@
 typedef struct {
   int track_enabled;
   int report_enabled;
-  int memcache_enabled;
 } DirConfig;
 
 
@@ -64,6 +63,8 @@ typedef struct {
   apr_global_mutex_t *cache_lock;
   char *lock_file;           /* filename for shm lock mutex */
   apr_size_t cache_bytes; 
+  char *memcache_server_file;
+  int memcache_enabled;
 
 #if APR_HAS_SHARED_MEMORY
     apr_shm_t *cache_shm;
@@ -105,9 +106,9 @@ static const command_rec upload_progress_cmds[] =
                  "Track upload progress in this location"),
     AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Report upload progress in this location"),
-    AP_INIT_FLAG("TrackWithMemcache", (CmdFunc) memcache_track_upload_progress_cmd, NULL, OR_AUTHCFG,
-                 "Track upload progress using MemCache in this location"),
-    AP_INIT_TAKE1("MemcacheServerFile", (CmdFunc) memcache_server_file_cmd, NULL, OR_AUTHCFG,
+    AP_INIT_FLAG("UploadProgressUseMemcache", (CmdFunc) memcache_track_upload_progress_cmd, NULL, RSRC_CONF,
+                 "Track upload progress using MemCache"),
+    AP_INIT_TAKE1("UploadProgressMemcacheFile", (CmdFunc) memcache_server_file_cmd, NULL, RSRC_CONF,
                  "File defining MEMCACHE_SERVERS variable containing list of servers in pool"),
     AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
                  "Size of shared memory used to keep uploads data, default 100KB"),
@@ -136,6 +137,10 @@ static void upload_progress_register_hooks (apr_pool_t *p)
 
 ServerConfig *get_server_config(request_rec *r) {
   return (ServerConfig*)ap_get_module_config(r->server->module_config, &upload_progress_module);
+}
+
+ServerConfig *get_per_dir_config(request_rec *r) {
+  return (DirConfig*)ap_get_module_config(r->per_dir_config, &upload_progress_module);
 }
 
 static int upload_progress_handle_request(request_rec *r)
