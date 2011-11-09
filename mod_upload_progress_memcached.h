@@ -4,6 +4,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <libmemcache.h>
 
 // The static connection to memcache
 /* static const memcached_st *memc; */
