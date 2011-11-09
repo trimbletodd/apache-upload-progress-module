@@ -113,7 +113,7 @@ static void memcache_cleanup();
 static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len);
 static bool file_exists(const char *filename);
 static void memcache_print_val(char *key, size_t length, char *namespace);
-static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace);
+static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, server_rec *s);
 
 static const command_rec upload_progress_cmds[] =
 {
@@ -716,6 +716,9 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                      "shared memory cache");
     }
 #endif
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+                 "Upload Progress: memcache_enabled %i\n",
+                 config->memcache_enabled);
 
     if (config->memcache_enabled){
       memcache_init(config->memcache_server_file);
@@ -898,7 +901,8 @@ static memcached_st *memcache_init(char *file){
   memcache_get_conn_string(file, conn_string, sizeof(conn_string));
   memcache_inst = memcached(conn_string, strlen(conn_string));
   if(memcache_inst == NULL){
-    printf("ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string);
+    ap_log_error(APLOG_MARK, APLOG_CRIT, 0, r->server,
+                 "ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string);
     exit(1);
   }
   memcached_return_t rc= memcached_version(memcache_inst);
@@ -937,19 +941,26 @@ static void memcache_cleanup(){
  *
  * Todo: make this use apr_pcalloc instead of malloc
  */
-static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace){
+static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, server_rec *s){
   memcached_return_t rc;
   uint32_t flags=0;
   char *json_str = (char *) malloc(1024);
   char key_w_ns[1024];
   sprintf(key_w_ns, "%s%s", namespace,key);
 
+  rc= memcached_version(memcache_inst);
+  if (rc != MEMCACHED_SUCCESS){
+    ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
+                 "ERROR: Unable to verify connection to memcached\n");
+  }
+
   // Caution, connection may have timed out by the time this is called.
   memcache_node_to_JSON(node, json_str);
-  /* printf("[%s] => %s\n", key_w_ns,json_str); */
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "setting %s -> %s.\n", key_w_ns, json_str);
   rc = memcached_set(memcache_inst, key_w_ns, strlen(key_w_ns), json_str, strlen(json_str), expiration, flags);
   if (rc != MEMCACHED_SUCCESS){
-    printf("ERROR: key=%s %s", key_w_ns, memcached_strerror(memcache_inst, rc));
+    ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
+                 "ERROR: %s: Unable to set key %s -> %s\n", memcached_strerror(memcache_inst, rc), key_w_ns, json_str);
   }
 }
 
