@@ -191,8 +191,8 @@ static int upload_progress_handle_request(request_rec *r)
           ctx->r = r;
           apr_pool_cleanup_register(r->pool, ctx, upload_progress_cleanup, apr_pool_cleanup_null);
           ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
-	}
-	CACHE_UNLOCK();
+        }
+        CACHE_UNLOCK();
       }
     }
   }
@@ -277,7 +277,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     CACHE_UNLOCK();
 
     if (config->memcache_enabled){
-      memcache_update_progress(id, node, config->memcache_namespace);
+      memcache_update_progress(id, node, config->memcache_namespace, f->r->server);
     }
 
     return APR_SUCCESS;
@@ -900,11 +900,6 @@ static memcached_st *memcache_init(char *file){
   char conn_string[1024];
   memcache_get_conn_string(file, conn_string, sizeof(conn_string));
   memcache_inst = memcached(conn_string, strlen(conn_string));
-  if(memcache_inst == NULL){
-    ap_log_error(APLOG_MARK, APLOG_CRIT, 0, r->server,
-                 "ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string);
-    exit(1);
-  }
   memcached_return_t rc= memcached_version(memcache_inst);
   if (rc != MEMCACHED_SUCCESS){
     printf("ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string);
