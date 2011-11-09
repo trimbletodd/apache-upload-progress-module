@@ -63,6 +63,7 @@ typedef struct {
   char *lock_file;           /* filename for shm lock mutex */
   apr_size_t cache_bytes; 
   char *memcache_server_file;
+  char *memcache_namespace;
   int memcache_enabled;
 
 #if APR_HAS_SHARED_MEMORY
@@ -113,6 +114,8 @@ static const command_rec upload_progress_cmds[] =
                  "Track upload progress using MemCache"),
     AP_INIT_TAKE1("UploadProgressMemcacheFile", (CmdFunc) memcache_server_file_cmd, NULL, RSRC_CONF,
                  "File defining MEMCACHE_SERVERS variable containing list of servers in pool"),
+    AP_INIT_TAKE1("UploadProgressMemcacheNamespace", (CmdFunc) memcache_namespace_cmd, NULL, RSRC_CONF,
+                 "Namespace to prepend to memcache keys"),
     AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
                  "Size of shared memory used to keep uploads data, default 100KB"),
     { NULL }
@@ -266,7 +269,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     CACHE_UNLOCK();
 
     if (config->memcache_enabled){
-      update_progress_memcache(id, node);
+      update_progress_memcache(id, node, config->memcache_namespace);
     }
 
     return APR_SUCCESS;

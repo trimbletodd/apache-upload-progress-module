@@ -9,7 +9,6 @@
 /* static const memcached_st *memc; */
 // The expiration time of the keys in seconds
 static const uint32_t expiration = 28800;
-static char *namespace="upload_progress:";
 static memcached_st *memcache_inst;
 
 static void memcache_node_to_JSON(upload_progress_node_t *node, char *str);
@@ -17,7 +16,8 @@ static memcached_st *memcache_init(char *file);
 static void memcache_cleanup();
 static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len);
 static bool file_exists(const char *filename);
-static void memcache_print_val(char *key, size_t length);
+static void memcache_print_val(char *key, size_t length, char *namespace);
+static void memcache_update_progress(char *key, upload_progress_node_t *node, char *namespace);
 
 /*
  * This sets the directory config for using memcache to track uploads.
@@ -37,6 +37,17 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *dumm
 static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg) {
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
     config->memcache_server_file = arg;
+    return NULL;
+}
+
+/*
+ * This sets the memcache namespace to use
+ * 
+ * Variable: UploadProgressMemcacheNamespace
+ */
+static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg) {
+    ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+    config->memcache_namespace = arg;
     return NULL;
 }
 
@@ -63,7 +74,7 @@ static memcached_st *memcache_init(char *file){
 /*
  * Primarily used for debugging
  */
-static void memcache_print_val(char *key, size_t length){
+static void memcache_print_val(char *key, size_t length, char *namespace){
   size_t return_value_length;
   char *ret_str;
   uint32_t flags=0;
@@ -89,7 +100,7 @@ static void memcache_cleanup(){
  *
  * Todo: make this use apr_pcalloc instead of malloc
  */
-static void memcache_update_progress(char *key, upload_progress_node_t *node){
+static void memcache_update_progress(char *key, upload_progress_node_t *node, char *namespace){
   memcached_return_t rc;
   uint32_t flags=0;
   char *json_str = (char *) malloc(1024);
