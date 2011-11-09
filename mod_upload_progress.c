@@ -186,6 +186,8 @@ static int upload_progress_handle_request(request_rec *r)
         }
 
         if (node) {
+          ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "adding input filter UPLOAD_PROGRESS.\n");
+          
           upload_progress_context_t *ctx = (upload_progress_context_t*)apr_pcalloc(r->pool, sizeof(upload_progress_context_t));
           ctx->node = node;
           ctx->r = r;
@@ -251,6 +253,8 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     apr_status_t rv;
     upload_progress_node_t *node;
     ServerConfig* config = get_server_config(f->r);
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server, "calling track_upload_progress.\n");
 
     if ((rv = ap_get_brigade(f->next, bb, mode, block,
                                  readbytes)) != APR_SUCCESS) {
@@ -720,6 +724,13 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                  "Upload Progress: memcache_enabled %i\n",
                  config->memcache_enabled);
 
+    if (memcache_inst==NULL){
+      ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "initializing memcached with file %s\n", config->memcache_server_file);
+      memcache_init(config->memcache_server_file);
+    }
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress3\n");
+
     if (config->memcache_enabled){
       memcache_init(config->memcache_server_file);
     }
@@ -942,12 +953,7 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   char *json_str = (char *) malloc(1024);
   char key_w_ns[1024];
   sprintf(key_w_ns, "%s%s", namespace,key);
-
-  rc= memcached_version(memcache_inst);
-  if (rc != MEMCACHED_SUCCESS){
-    ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
-                 "ERROR: Unable to verify connection to memcached\n");
-  }
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress\n");
 
   // Caution, connection may have timed out by the time this is called.
   memcache_node_to_JSON(node, json_str);
