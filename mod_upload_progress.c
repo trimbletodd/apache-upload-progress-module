@@ -103,6 +103,7 @@ typedef const char * (*CmdFunc)();// Workaround for some weird C++-specific comp
 // for mod_upload_progress_memcached.h
 static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg);
 static const char *memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg);
+static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg);
 
 static const command_rec upload_progress_cmds[] =
 {
