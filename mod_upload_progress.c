@@ -64,6 +64,7 @@ typedef struct {
   char *lock_file;           /* filename for shm lock mutex */
   apr_size_t cache_bytes; 
   char *memcache_server_file;
+  char *memcache_conn_str;
   char *memcache_namespace;
   int memcache_enabled;
 
@@ -106,10 +107,10 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *conf
 static const char *memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg);
 static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg);
 static const uint32_t expiration = 28800;
-static memcached_st *memcache_inst;
+static char *memcache_conn_str;
 static void memcache_node_to_JSON(upload_progress_node_t *node, char *str);
 static memcached_st *memcache_init(char *file);
-static void memcache_cleanup();
+/* static void memcache_cleanup(); */
 static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len);
 static bool file_exists(const char *filename);
 static void memcache_print_val(char *key, size_t length, char *namespace);
@@ -254,7 +255,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     upload_progress_node_t *node;
     ServerConfig* config = get_server_config(f->r);
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server, "calling track_upload_progress.\n");
+    /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server, "calling track_upload_progress.\n"); */
 
     if ((rv = ap_get_brigade(f->next, bb, mode, block,
                                  readbytes)) != APR_SUCCESS) {
@@ -506,10 +507,10 @@ static apr_status_t upload_progress_cleanup(void *data)
     ctx->node->done = 1;
   }
 
-  ServerConfig *config = get_server_config(ctx->r);
-  if (config->memcache_enabled){
-    memcache_cleanup();
-  }
+  /* ServerConfig *config = get_server_config(ctx->r); */
+  /* if (config->memcache_enabled){ */
+  /*   memcache_cleanup(); */
+  /* } */
 
   return APR_SUCCESS;
 }
@@ -720,20 +721,20 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                      "shared memory cache");
     }
 #endif
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
-                 "Upload Progress: memcache_enabled %i\n",
-                 config->memcache_enabled);
+    /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, */
+    /*              "Upload Progress: memcache_enabled %i\n", */
+    /*              config->memcache_enabled); */
 
-    if (memcache_inst==NULL){
-      ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "initializing memcached with file %s\n", config->memcache_server_file);
-      memcache_init(config->memcache_server_file);
-    }
+    /* if (memcache_inst==NULL){ */
+    /*   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "initializing memcached with file %s\n", config->memcache_server_file); */
+    /*   memcache_init(config->memcache_server_file); */
+    /* } */
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress3\n");
+    /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress3\n"); */
 
-    if (config->memcache_enabled){
-      memcache_init(config->memcache_server_file);
-    }
+    /* if (config->memcache_enabled){ */
+    /*   memcache_init(config->memcache_server_file); */
+    /* } */
   return(OK);
 }
 
@@ -887,7 +888,14 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *dumm
  */
 static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg) {
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+    char conn_string[1024];
+
     config->memcache_server_file = arg;
+    memcache_get_conn_string(config->memcache_server_file, conn_string, sizeof(conn_string));
+    config->memcache_conn_str = &conn_string;
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, cmd->server, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
+
     return NULL;
 }
 
@@ -907,40 +915,40 @@ static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg
  *
  * Todo: if file doesn't exist/is not readable, throw error
  */
-static memcached_st *memcache_init(char *file){
-  char conn_string[1024];
-  memcache_get_conn_string(file, conn_string, sizeof(conn_string));
-  memcache_inst = memcached(conn_string, strlen(conn_string));
-  memcached_return_t rc= memcached_version(memcache_inst);
-  if (rc != MEMCACHED_SUCCESS){
-    printf("ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string);
-  }
-  return(memcache_inst);
-}
+/* static memcached_st *memcache_init(char *file){ */
+/*   char conn_string[1024]; */
+/*   memcache_get_conn_string(file, conn_string, sizeof(conn_string)); */
+/*   memcache_inst = memcached(conn_string, strlen(conn_string)); */
+/*   memcached_return_t rc= memcached_version(memcache_inst); */
+/*   if (rc != MEMCACHED_SUCCESS){ */
+/*     printf("ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string); */
+/*   } */
+/*   return(memcache_inst); */
+/* } */
 
 /*
  * Primarily used for debugging
  */
-static void memcache_print_val(char *key, size_t length, char *namespace){
-  size_t return_value_length;
-  char *ret_str;
-  uint32_t flags=0;
-  memcached_return_t rc;
-  char key_w_ns[1024];
-  sprintf(key_w_ns, "%s%s", namespace,key);
+/* static void memcache_print_val(char *key, size_t length, char *namespace){ */
+/*   size_t return_value_length; */
+/*   char *ret_str; */
+/*   uint32_t flags=0; */
+/*   memcached_return_t rc; */
+/*   char key_w_ns[1024]; */
+/*   sprintf(key_w_ns, "%s%s", namespace,key); */
 
-  ret_str = memcached_get(memcache_inst, key_w_ns, strlen(key_w_ns), &return_value_length, &flags, &rc);
-  if (rc != MEMCACHED_SUCCESS){printf("ERROR: ");}
-  printf("Get(%s) => %s (rc: %s)\n", key_w_ns, ret_str, memcached_strerror(memcache_inst, rc));
+/*   ret_str = memcached_get(memcache_inst, key_w_ns, strlen(key_w_ns), &return_value_length, &flags, &rc); */
+/*   if (rc != MEMCACHED_SUCCESS){printf("ERROR: ");} */
+/*   printf("Get(%s) => %s (rc: %s)\n", key_w_ns, ret_str, memcached_strerror(memcache_inst, rc)); */
 
-}
+/* } */
 
 /*
  * Terminates the memcache connection
  */
-static void memcache_cleanup(){
-  memcached_free(memcache_inst);
-}
+/* static void memcache_cleanup(memcached_st *memc){ */
+/*   memcached_free(memc); */
+/* } */
 
 /*
  * updates memcache key with the JSON from the node
@@ -953,22 +961,20 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   char *json_str = (char *) malloc(1024);
   char key_w_ns[240];
   sprintf(key_w_ns, "%s%s", namespace,key);
-  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress\n");
+  /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress\n"); */
 
-/* current issue: */
-/* [Wed Nov 09 18:20:19 2011] [debug] mod_upload_progress.c(257): calling track_upload_progress.\n */
-/* [Wed Nov 09 18:20:19 2011] [debug] mod_upload_progress.c(956): calling memcached_update_progress\n */
-/* [Wed Nov 09 18:20:19 2011] [debug] mod_upload_progress.c(960): setting upload_progress:=b641a22a6ff495e3c9e2da1cfb0fcdf8_029 -> {"state": "0","size": "164649633","received": "8454872","speed": "8454872","started_at": "1320880818"}.\n */
-/* [Wed Nov 09 18:20:19 2011] [warn] ERROR: SERVER HAS FAILED AND IS DISABLED UNTIL TIMED RETRY: Unable to set key upload_progress:=b641a22a6ff495e3c9e2da1cfb0fcdf8_029 -> {"state": "0","size": "164649633","received": "8454872","speed": "8454872","started_at": "1320880818"}\n */
+  char *conn_string = "--SERVER=localhost:11211";
+  memcached_st *memc=memcached(conn_string, strlen(conn_string));
 
   // Caution, connection may have timed out by the time this is called.
   memcache_node_to_JSON(node, json_str);
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "setting %s -> %s.\n", key_w_ns, json_str);
-  rc = memcached_set(memcache_inst, key_w_ns, strlen(key_w_ns), json_str, strlen(json_str), expiration, flags);
+  rc = memcached_set(memc, key_w_ns, strlen(key_w_ns), json_str, strlen(json_str), expiration, flags);
   if (rc != MEMCACHED_SUCCESS){
     ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
-                 "ERROR: %s: Unable to set key %s -> %s\n", memcached_strerror(memcache_inst, rc), key_w_ns, json_str);
+                 "ERROR: %s: Unable to set key %s -> %s\n", memcached_strerror(memc, rc), key_w_ns, json_str);
   }
+  memcached_free(memc);
 }
 
 /*
