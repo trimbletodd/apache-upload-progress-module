@@ -114,7 +114,7 @@ static memcached_st *memcache_init(char *file);
 static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len);
 static bool file_exists(const char *filename);
 static void memcache_print_val(char *key, size_t length, char *namespace);
-static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, server_rec *s);
+static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, request_rec *r);
 
 static const command_rec upload_progress_cmds[] =
 {
@@ -282,7 +282,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     CACHE_UNLOCK();
 
     if (config->memcache_enabled){
-      memcache_update_progress(id, node, config->memcache_namespace, f->r->server);
+      memcache_update_progress(id, node, config->memcache_namespace, f->r);
     }
 
     return APR_SUCCESS;
@@ -955,10 +955,12 @@ static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg
  *
  * Todo: make this use apr_pcalloc instead of malloc
  */
-static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, server_rec *s){
+static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, request_rec *r){
+  server_rec *s = r->server;
   memcached_return_t rc;
   uint32_t flags=0;
-  char *json_str = (char *) malloc(1024);
+  char *json_str;
+  /* char *json_str = (char *) malloc(1024); */
   char key_w_ns[240];
   sprintf(key_w_ns, "%s%s", namespace,key);
   /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress\n"); */
@@ -967,7 +969,19 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   memcached_st *memc=memcached(conn_string, strlen(conn_string));
 
   // Caution, connection may have timed out by the time this is called.
-  memcache_node_to_JSON(node, json_str);
+  //memcache_node_to_JSON(node, json_str);
+  if (node == NULL) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
+  } else if (node->err_status >= HTTP_BAD_REQUEST  ) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d }", err_status);
+  } else if (done) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"done\" }");
+  } else if ( node->length == 0 && node->received == 0 ) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
+  } else {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d  }", node->received, node->length, node->speed, node->started_at);
+  }
+
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "setting %s -> %s.\n", key_w_ns, json_str);
   rc = memcached_set(memc, key_w_ns, strlen(key_w_ns), json_str, strlen(json_str), expiration, flags);
   if (rc != MEMCACHED_SUCCESS){
@@ -983,8 +997,21 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
 static void memcache_node_to_JSON(upload_progress_node_t *node, char *str){
   if (node == NULL) {
     sprintf(str, "node undefined in node_to_JSON");
-  }else{
-    sprintf(str, "{\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\",\"%s\": \"%i\"}",
+  }else{   
+
+    /* if (!found) { */
+    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }"); */
+    /* } else if (err_status >= HTTP_BAD_REQUEST  ) { */
+    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d }", err_status); */
+    /* } else if (done) { */
+    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"done\" }"); */
+    /* } else if ( length == 0 && received == 0 ) { */
+    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }"); */
+    /* } else { */
+    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d  }", received, length, speed, started_at); */
+    /* } */
+
+    sprintf(str, "{\"%s\": %i,\"%s\": %i,\"%s\": %i,\"%s\": %i,\"%s\": \"%i\"}",
             "state", node->done,
             "size", node->length,
             "received", node->received,
