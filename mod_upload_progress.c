@@ -883,25 +883,22 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *dumm
 
 /*
  * This sets the file where MEMCACHE_SERVERS is defined.
- * 
  * Variable: UploadProgressMemcacheFile
  */
 static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg) {
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
     char conn_string[1024];
-
     config->memcache_server_file = arg;
     memcache_get_conn_string(config->memcache_server_file, conn_string, sizeof(conn_string));
+
     config->memcache_conn_str = &conn_string;
 
     ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, cmd->server, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
-
     return NULL;
 }
 
 /*
  * This sets the memcache namespace to use
- * 
  * Variable: UploadProgressMemcacheNamespace
  */
 static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg) {
@@ -911,65 +908,18 @@ static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg
 }
 
 /*
- * Initializes the memcache connection
- *
- * Todo: if file doesn't exist/is not readable, throw error
- */
-/* static memcached_st *memcache_init(char *file){ */
-/*   char conn_string[1024]; */
-/*   memcache_get_conn_string(file, conn_string, sizeof(conn_string)); */
-/*   memcache_inst = memcached(conn_string, strlen(conn_string)); */
-/*   memcached_return_t rc= memcached_version(memcache_inst); */
-/*   if (rc != MEMCACHED_SUCCESS){ */
-/*     printf("ERROR: Unable to initiate connection to memcached using connection string %s\n", conn_string); */
-/*   } */
-/*   return(memcache_inst); */
-/* } */
-
-/*
- * Primarily used for debugging
- */
-/* static void memcache_print_val(char *key, size_t length, char *namespace){ */
-/*   size_t return_value_length; */
-/*   char *ret_str; */
-/*   uint32_t flags=0; */
-/*   memcached_return_t rc; */
-/*   char key_w_ns[1024]; */
-/*   sprintf(key_w_ns, "%s%s", namespace,key); */
-
-/*   ret_str = memcached_get(memcache_inst, key_w_ns, strlen(key_w_ns), &return_value_length, &flags, &rc); */
-/*   if (rc != MEMCACHED_SUCCESS){printf("ERROR: ");} */
-/*   printf("Get(%s) => %s (rc: %s)\n", key_w_ns, ret_str, memcached_strerror(memcache_inst, rc)); */
-
-/* } */
-
-/*
- * Terminates the memcache connection
- */
-/* static void memcache_cleanup(memcached_st *memc){ */
-/*   memcached_free(memc); */
-/* } */
-
-/*
  * updates memcache key with the JSON from the node
- *
- * Todo: make this use apr_pcalloc instead of malloc
  */
 static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, request_rec *r){
   server_rec *s = r->server;
   memcached_return_t rc;
   uint32_t flags=0;
   char *json_str;
-  /* char *json_str = (char *) malloc(1024); */
-  char key_w_ns[240];
-  sprintf(key_w_ns, "%s%s", namespace,key);
-  /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress\n"); */
+  char *key_w_ns = apr_psprintf(r->pool, "%s%s", namespace,key);
 
   char *conn_string = "--SERVER=localhost:11211";
   memcached_st *memc=memcached(conn_string, strlen(conn_string));
 
-  // Caution, connection may have timed out by the time this is called.
-  //memcache_node_to_JSON(node, json_str);
   if (node == NULL) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
   } else if (node->err_status >= HTTP_BAD_REQUEST  ) {
@@ -989,35 +939,6 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
                  "ERROR: %s: Unable to set key %s -> %s\n", memcached_strerror(memc, rc), key_w_ns, json_str);
   }
   memcached_free(memc);
-}
-
-/*
- * Return node data in JSON
- */
-static void memcache_node_to_JSON(upload_progress_node_t *node, char *str){
-  if (node == NULL) {
-    sprintf(str, "node undefined in node_to_JSON");
-  }else{   
-
-    /* if (!found) { */
-    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }"); */
-    /* } else if (err_status >= HTTP_BAD_REQUEST  ) { */
-    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d }", err_status); */
-    /* } else if (done) { */
-    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"done\" }"); */
-    /* } else if ( length == 0 && received == 0 ) { */
-    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }"); */
-    /* } else { */
-    /*   response = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d  }", received, length, speed, started_at); */
-    /* } */
-
-    sprintf(str, "{\"%s\": %i,\"%s\": %i,\"%s\": %i,\"%s\": %i,\"%s\": \"%i\"}",
-            "state", node->done,
-            "size", node->length,
-            "received", node->received,
-            "speed", node->speed,
-            "started_at", node->started_at);
-  }
 }
 
 /*
