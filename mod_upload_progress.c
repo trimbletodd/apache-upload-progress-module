@@ -109,12 +109,9 @@ static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg
 static const uint32_t expiration = 28800;
 static char *memcache_conn_str;
 static void memcache_node_to_JSON(upload_progress_node_t *node, char *str);
-static memcached_st *memcache_init(char *file);
-/* static void memcache_cleanup(); */
 static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len);
 static bool file_exists(const char *filename);
-static void memcache_print_val(char *key, size_t length, char *namespace);
-static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, request_rec *r);
+static void memcache_update_progress(const char *key, upload_progress_node_t *node, ServerConfig *config, request_rec *r);
 
 static const command_rec upload_progress_cmds[] =
 {
@@ -282,7 +279,7 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     CACHE_UNLOCK();
 
     if (config->memcache_enabled){
-      memcache_update_progress(id, node, config->memcache_namespace, f->r);
+      memcache_update_progress(id, node, config, f->r);
     }
 
     return APR_SUCCESS;
@@ -910,15 +907,14 @@ static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg
 /*
  * updates memcache key with the JSON from the node
  */
-static void memcache_update_progress(const char *key, upload_progress_node_t *node, char *namespace, request_rec *r){
+static void memcache_update_progress(const char *key, upload_progress_node_t *node, ServerConfig *config, request_rec *r){
   server_rec *s = r->server;
   memcached_return_t rc;
   uint32_t flags=0;
   char *json_str;
-  char *key_w_ns = apr_psprintf(r->pool, "%s%s", namespace,key);
+  char *key_w_ns = apr_psprintf(r->pool, "%s%s", config->memcache_namespace,key);
 
-  char *conn_string = "--SERVER=localhost:11211";
-  memcached_st *memc=memcached(conn_string, strlen(conn_string));
+  memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
 
   if (node == NULL) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
