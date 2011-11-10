@@ -951,9 +951,15 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   memcached_return_t rc;
   uint32_t flags=0;
   char *json_str = (char *) malloc(1024);
-  char key_w_ns[1024];
+  char key_w_ns[240];
   sprintf(key_w_ns, "%s%s", namespace,key);
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress\n");
+
+/* current issue: */
+/* [Wed Nov 09 18:20:19 2011] [debug] mod_upload_progress.c(257): calling track_upload_progress.\n */
+/* [Wed Nov 09 18:20:19 2011] [debug] mod_upload_progress.c(956): calling memcached_update_progress\n */
+/* [Wed Nov 09 18:20:19 2011] [debug] mod_upload_progress.c(960): setting upload_progress:=b641a22a6ff495e3c9e2da1cfb0fcdf8_029 -> {"state": "0","size": "164649633","received": "8454872","speed": "8454872","started_at": "1320880818"}.\n */
+/* [Wed Nov 09 18:20:19 2011] [warn] ERROR: SERVER HAS FAILED AND IS DISABLED UNTIL TIMED RETRY: Unable to set key upload_progress:=b641a22a6ff495e3c9e2da1cfb0fcdf8_029 -> {"state": "0","size": "164649633","received": "8454872","speed": "8454872","started_at": "1320880818"}\n */
 
   // Caution, connection may have timed out by the time this is called.
   memcache_node_to_JSON(node, json_str);
