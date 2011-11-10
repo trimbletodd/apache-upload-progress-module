@@ -973,8 +973,8 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   if (node == NULL) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
   } else if (node->err_status >= HTTP_BAD_REQUEST  ) {
-    json_str = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d }", err_status);
-  } else if (done) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d }", node->err_status);
+  } else if (node->done) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"done\" }");
   } else if ( node->length == 0 && node->received == 0 ) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
