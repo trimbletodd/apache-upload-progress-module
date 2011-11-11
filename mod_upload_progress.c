@@ -5,6 +5,7 @@
 #include <apr_strings.h>
 #include "unixd.h"
 #include <libmemcached/memcached.h>
+#include <libmemcached/util/pool.h>
 
 #if APR_HAS_SHARED_MEMORY
 #include "apr_rmm.h"
@@ -943,7 +944,17 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   char *key_w_ns = apr_psprintf(r->pool, "%s%s", config->memcache_namespace,key);
 
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
-  memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
+
+  // This is only a single instance of memcache.  Need a pool.
+  //  memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
+
+  memcached_pool_st* pool= memcached_pool(config->memcache_conn_str, strlen(config->memcache_conn_str));
+
+  memcached_st *memc= memcached_pool_pop(pool, false, &rc);
+  if (rc != MEMCACHED_SUCCESS){
+    ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
+                 "ERROR: %s: Unable to create memcache pool.", memcached_strerror(memc, rc));
+  }
 
   /* char *conn_string = "--SERVER=localhost:11211"; */
   /* memcached_st *memc=memcached(conn_string, strlen(conn_string)); */
@@ -966,7 +977,19 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
     ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
                  "ERROR: %s: Unable to set key %s -> %s\n", memcached_strerror(memc, rc), key_w_ns, json_str);
   }
-  memcached_free(memc);
+
+
+  /*
+    Release the memc_ptr that was pulled from the pool
+  */
+  memcached_pool_push(pool, memc);
+
+  /*
+    Destroy the pool.
+  */
+  memcached_pool_destroy(pool);
+
+//  memcached_free(memc);
 }
 
 static bool file_exists(const char *filename){    
