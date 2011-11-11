@@ -107,8 +107,6 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *conf
 static const char *memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg);
 static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg);
 static const uint32_t expiration = 28800;
-static void memcache_node_to_JSON(upload_progress_node_t *node, char *str);
-static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len);
 static bool file_exists(const char *filename);
 static void memcache_update_progress(const char *key, upload_progress_node_t *node, ServerConfig *config, request_rec *r);
 
@@ -886,7 +884,6 @@ static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *a
     char conn_string[1024];
     config->memcache_server_file = arg;
 
-    // memcache_get_conn_string(config->memcache_server_file, conn_string, sizeof(conn_string));
     if (!file_exists(config->memcache_server_file)){
       config->memcache_conn_str = apr_psprintf(cmd->pool, "%s", "--SERVER=localhost:11211");
     }else{
@@ -970,48 +967,6 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
                  "ERROR: %s: Unable to set key %s -> %s\n", memcached_strerror(memc, rc), key_w_ns, json_str);
   }
   memcached_free(memc);
-}
-
-/*
- * Takes a ruby input file, which should define MEMCACHED_SERVERS,
- * and outputs a properly defined config string.
- *
- * Note the dependency on ruby being defined in $PATH.
- */
-static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len){
-  if (!file_exists(file)){
-    sprintf(config_string, "%s", "--SERVER=localhost:11211");
-    return;
-  }
-
-  char command[1024];
-  FILE *fp;
-  char path[100];
-  /* Build the command to parse the file */
-  sprintf(command, "ruby -e \'require \"%s\"; puts MEMCACHED_SERVERS.map{|h| \"--SERVER=#{h}\"}.join(\" \")\' 2> /dev/null", file);
-
-  /* Open the command for reading. */
-  fp = popen(command, "r");
-  if (fp == NULL) {
-    printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", file, command);
-    exit(1);
-  }
-
-  fgets(config_string, config_str_len-1, fp);
-  int i=0;
-  while(i<config_str_len){
-    if (config_string[i] == '\n') {
-      config_string[i] = '\0';
-      break;
-    }
-    i++;
-  }      
-
-  /* close */
-  if (pclose(fp) != 0){
-    printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", file, command);
-    exit(1);
-  }
 }
 
 static bool file_exists(const char *filename){    
