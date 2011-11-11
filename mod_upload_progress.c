@@ -107,7 +107,6 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *conf
 static const char *memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg);
 static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg);
 static const uint32_t expiration = 28800;
-static char *memcache_conn_str;
 static void memcache_node_to_JSON(upload_progress_node_t *node, char *str);
 static void memcache_get_conn_string(char *file, char *config_string, size_t config_str_len);
 static bool file_exists(const char *filename);
@@ -886,9 +885,41 @@ static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *a
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
     char conn_string[1024];
     config->memcache_server_file = arg;
-    memcache_get_conn_string(config->memcache_server_file, conn_string, sizeof(conn_string));
 
-    config->memcache_conn_str = &conn_string;
+    // memcache_get_conn_string(config->memcache_server_file, conn_string, sizeof(conn_string));
+    if (!file_exists(config->memcache_server_file)){
+      config->memcache_conn_str = apr_psprintf(cmd->pool, "%s", "--SERVER=localhost:11211");
+    }else{
+      char *command = apr_psprintf(cmd->pool, "ruby -e \'require \"%s\"; puts MEMCACHED_SERVERS.map{|h| \"--SERVER=#{h}\"}.join(\" \")\' 2> /dev/null", config->memcache_server_file);
+      FILE *fp = popen(command, "r");
+      if (fp == NULL) {
+        printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", config->memcache_server_file, command);
+        exit(1);
+      }
+
+      // Read the line from the pipe
+      char *config_string = apr_pcalloc(cmd->pool, 1024);
+      int config_str_len=1024;
+      fgets(config_string, config_str_len-1, fp);
+      int i=0;
+      while(i<config_str_len){
+        if (config_string[i] == '\n') {
+          config_string[i] = '\0';
+          break;
+        }
+        i++;
+      }      
+
+      /* close */
+      if (pclose(fp) != 0){
+        printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", config->memcache_server_file, command);
+        exit(1);
+      }
+
+      config->memcache_conn_str = apr_psprintf(cmd->pool, "%s", config_string);
+    }
+      
+    /* config->memcache_conn_str = apr_psprintf(cmd->pool, "lkjlkjlkj"); */
 
     ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, cmd->server, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
     return NULL;
@@ -914,7 +945,11 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   char *json_str;
   char *key_w_ns = apr_psprintf(r->pool, "%s%s", config->memcache_namespace,key);
 
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
   memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
+
+  /* char *conn_string = "--SERVER=localhost:11211"; */
+  /* memcached_st *memc=memcached(conn_string, strlen(conn_string)); */
 
   if (node == NULL) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
