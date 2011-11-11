@@ -4,3 +4,6 @@
 *~
 *.slo
 *.la
+test.c
+a.out
+TAGS

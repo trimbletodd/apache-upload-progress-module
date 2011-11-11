@@ -4,6 +4,7 @@
 #include <apr_pools.h>
 #include <apr_strings.h>
 #include "unixd.h"
+#include <libmemcached/memcached.h>
 
 #if APR_HAS_SHARED_MEMORY
 #include "apr_rmm.h"
@@ -14,8 +15,8 @@
 #include <unistd.h>
 #endif
 
-#define PROGRESS_ID "upload_id"
-#define PROGRESS_ID_LEN 9
+#define PROGRESS_ID "upload_id="
+#define PROGRESS_ID_LEN 10
 
 #define CACHE_LOCK() do {                                  \
     if (config->cache_lock)                               \
@@ -62,6 +63,10 @@ typedef struct {
   apr_global_mutex_t *cache_lock;
   char *lock_file;           /* filename for shm lock mutex */
   apr_size_t cache_bytes; 
+  char *memcache_server_file;
+  char *memcache_conn_str;
+  char *memcache_namespace;
+  int memcache_enabled;
 
 #if APR_HAS_SHARED_MEMORY
     apr_shm_t *cache_shm;
@@ -97,12 +102,26 @@ int upload_progress_init(apr_pool_t *, apr_pool_t *, apr_pool_t *, server_rec *)
 //from passenger
 typedef const char * (*CmdFunc)();// Workaround for some weird C++-specific compiler error.
 
+// for mod_upload_progress_memcached.h
+static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *config, int arg);
+static const char *memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg);
+static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg);
+static const uint32_t expiration = 28800;
+static bool file_exists(const char *filename);
+static void memcache_update_progress(const char *key, upload_progress_node_t *node, ServerConfig *config, request_rec *r);
+
 static const command_rec upload_progress_cmds[] =
 {
     AP_INIT_FLAG("TrackUploads", (CmdFunc) track_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Track upload progress in this location"),
     AP_INIT_FLAG("ReportUploads", (CmdFunc) report_upload_progress_cmd, NULL, OR_AUTHCFG,
                  "Report upload progress in this location"),
+    AP_INIT_FLAG("UploadProgressUseMemcache", (CmdFunc) memcache_track_upload_progress_cmd, NULL, RSRC_CONF,
+                 "Track upload progress using MemCache"),
+    AP_INIT_TAKE1("UploadProgressMemcacheFile", (CmdFunc) memcache_server_file_cmd, NULL, RSRC_CONF,
+                 "File defining MEMCACHE_SERVERS variable containing list of servers in pool"),
+    AP_INIT_TAKE1("UploadProgressMemcacheNamespace", (CmdFunc) memcache_namespace_cmd, NULL, RSRC_CONF,
+                 "Namespace to prepend to memcache keys"),
     AP_INIT_TAKE1("UploadProgressSharedMemorySize", (CmdFunc) upload_progress_shared_memory_size_cmd, NULL, RSRC_CONF,
                  "Size of shared memory used to keep uploads data, default 100KB"),
     { NULL }
@@ -162,13 +181,15 @@ static int upload_progress_handle_request(request_rec *r)
         }
 
         if (node) {
+          ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, r->server, "adding input filter UPLOAD_PROGRESS.\n");
+          
           upload_progress_context_t *ctx = (upload_progress_context_t*)apr_pcalloc(r->pool, sizeof(upload_progress_context_t));
           ctx->node = node;
           ctx->r = r;
           apr_pool_cleanup_register(r->pool, ctx, upload_progress_cleanup, apr_pool_cleanup_null);
           ap_add_input_filter("UPLOAD_PROGRESS", NULL, r, r->connection);
-	}
-	CACHE_UNLOCK();
+        }
+        CACHE_UNLOCK();
       }
     }
   }
@@ -228,6 +249,8 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
     upload_progress_node_t *node;
     ServerConfig* config = get_server_config(f->r);
 
+    /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server, "calling track_upload_progress.\n"); */
+
     if ((rv = ap_get_brigade(f->next, bb, mode, block,
                                  readbytes)) != APR_SUCCESS) {
       return rv;
@@ -251,7 +274,11 @@ static int track_upload_progress(ap_filter_t *f, apr_bucket_brigade *bb,
       }
     }
     CACHE_UNLOCK();
-    
+
+    if (config->memcache_enabled){
+      memcache_update_progress(id, node, config, f->r);
+    }
+
     return APR_SUCCESS;
 }
 
@@ -465,15 +492,21 @@ upload_progress_node_t *find_node(request_rec *r, const char *key) {
 
 static apr_status_t upload_progress_cleanup(void *data)
 {
-    /* FIXME: this function should use locking because it modifies node data */
-    upload_progress_context_t *ctx = (upload_progress_context_t *)data;
-    if (ctx->node) {
-	if(ctx->r->status >= HTTP_BAD_REQUEST) 
+  /* FIXME: this function should use locking because it modifies node data */
+  upload_progress_context_t *ctx = (upload_progress_context_t *)data;
+  if (ctx->node) {
+    if(ctx->r->status >= HTTP_BAD_REQUEST) 
 	    ctx->node->err_status = ctx->r->status;
-        ctx->node->expires = time(NULL) + 60; /*expires in 60s */
-        ctx->node->done = 1;
-    }
-    return APR_SUCCESS;
+    ctx->node->expires = time(NULL) + 60; /*expires in 60s */
+    ctx->node->done = 1;
+  }
+
+  /* ServerConfig *config = get_server_config(ctx->r); */
+  /* if (config->memcache_enabled){ */
+  /*   memcache_cleanup(); */
+  /* } */
+
+  return APR_SUCCESS;
 }
 
 static void clean_old_connections(request_rec *r) {
@@ -682,7 +715,20 @@ int upload_progress_init(apr_pool_t *p, apr_pool_t *plog,
                      "shared memory cache");
     }
 #endif
+    /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, */
+    /*              "Upload Progress: memcache_enabled %i\n", */
+    /*              config->memcache_enabled); */
 
+    /* if (memcache_inst==NULL){ */
+    /*   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "initializing memcached with file %s\n", config->memcache_server_file); */
+    /*   memcache_init(config->memcache_server_file); */
+    /* } */
+
+    /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "calling memcached_update_progress3\n"); */
+
+    /* if (config->memcache_enabled){ */
+    /*   memcache_init(config->memcache_server_file); */
+    /* } */
   return(OK);
 }
 
@@ -814,3 +860,121 @@ static void upload_progress_child_init(apr_pool_t *p, server_rec *s)
         s_vhost = s_vhost->next;
     }
 }
+
+/**********************/
+/* Memcache functions */
+/**********************/
+
+/*
+ * This sets the directory config for using memcache to track uploads.
+ * Variable: UploadProgressUseMemcache
+ */
+static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *dummy, int arg){
+    ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+    config->memcache_enabled = arg;
+    return NULL;
+}
+
+/*
+ * This sets the file where MEMCACHE_SERVERS is defined.
+ * Variable: UploadProgressMemcacheFile
+ */
+static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg) {
+    ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+    char conn_string[1024];
+    config->memcache_server_file = arg;
+
+    if (!file_exists(config->memcache_server_file)){
+      config->memcache_conn_str = apr_psprintf(cmd->pool, "%s", "--SERVER=localhost:11211");
+    }else{
+      char *command = apr_psprintf(cmd->pool, "ruby -e \'require \"%s\"; puts MEMCACHED_SERVERS.map{|h| \"--SERVER=#{h}\"}.join(\" \")\' 2> /dev/null", config->memcache_server_file);
+      FILE *fp = popen(command, "r");
+      if (fp == NULL) {
+        printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", config->memcache_server_file, command);
+        exit(1);
+      }
+
+      // Read the line from the pipe
+      char *config_string = apr_pcalloc(cmd->pool, 1024);
+      int config_str_len=1024;
+      fgets(config_string, config_str_len-1, fp);
+      int i=0;
+      while(i<config_str_len){
+        if (config_string[i] == '\n') {
+          config_string[i] = '\0';
+          break;
+        }
+        i++;
+      }      
+
+      /* close */
+      if (pclose(fp) != 0){
+        printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", config->memcache_server_file, command);
+        exit(1);
+      }
+
+      config->memcache_conn_str = apr_psprintf(cmd->pool, "%s", config_string);
+    }
+      
+    /* config->memcache_conn_str = apr_psprintf(cmd->pool, "lkjlkjlkj"); */
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, cmd->server, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
+    return NULL;
+}
+
+/*
+ * This sets the memcache namespace to use
+ * Variable: UploadProgressMemcacheNamespace
+ */
+static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg) {
+    ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
+    config->memcache_namespace = arg;
+    return NULL;
+}
+
+/*
+ * updates memcache key with the JSON from the node
+ */
+static void memcache_update_progress(const char *key, upload_progress_node_t *node, ServerConfig *config, request_rec *r){
+  server_rec *s = r->server;
+  memcached_return_t rc;
+  uint32_t flags=0;
+  char *json_str;
+  char *key_w_ns = apr_psprintf(r->pool, "%s%s", config->memcache_namespace,key);
+
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
+  memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
+
+  /* char *conn_string = "--SERVER=localhost:11211"; */
+  /* memcached_st *memc=memcached(conn_string, strlen(conn_string)); */
+
+  if (node == NULL) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
+  } else if (node->err_status >= HTTP_BAD_REQUEST  ) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"error\", \"status\" : %d }", node->err_status);
+  } else if (node->done) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"done\" }");
+  } else if ( node->length == 0 && node->received == 0 ) {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
+  } else {
+    json_str = apr_psprintf(r->pool, "{ \"state\" : \"uploading\", \"received\" : %d, \"size\" : %d, \"speed\" : %d, \"started_at\": %d  }", node->received, node->length, node->speed, node->started_at);
+  }
+
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "setting %s -> %s.\n", key_w_ns, json_str);
+  rc = memcached_set(memc, key_w_ns, strlen(key_w_ns), json_str, strlen(json_str), expiration, flags);
+  if (rc != MEMCACHED_SUCCESS){
+    ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
+                 "ERROR: %s: Unable to set key %s -> %s\n", memcached_strerror(memc, rc), key_w_ns, json_str);
+  }
+  memcached_free(memc);
+}
+
+static bool file_exists(const char *filename){    
+  FILE *file;
+  if (file = fopen(filename, "r")){
+    fclose(file);        
+    return true;    
+  }
+  return false;
+}
+
