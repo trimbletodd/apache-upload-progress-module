@@ -993,14 +993,14 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   /*
     Release the memc_ptr that was pulled from the pool
   */
-  memcached_pool_push(pool, memc);
+  /* memcached_pool_push(pool, memc); */
 
   /*
     Destroy the pool.
   */
-  memcached_pool_destroy(pool);
+  /* memcached_pool_destroy(pool); */
 
-//  memcached_free(memc);
+  memcached_free(memc);
 }
 
 static bool file_exists(const char *filename){    
