@@ -963,11 +963,11 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,  */
   /*              "Memcache using distribution algorithm: %s", libmemcached_string_distribution(memcached_behavior_get_distribution_hash(memc))); */
 
-  uint32_t hash_value = memcached_generate_hash_value(key, strlen(key), MEMCACHED_HASH_CRC);
-  uint32_t server_key = memcached_generate_hash(memc, key, strlen(key));
+  uint32_t hash_value = memcached_generate_hash_value(key_w_ns, strlen(key_w_ns), MEMCACHED_HASH_CRC);
+  uint32_t server_key = memcached_generate_hash(memc, key_w_ns, strlen(key_w_ns));
   memcached_server_instance_st server_inst = memcached_server_instance_by_position(memc, server_key);
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
-               "Key %s => Hash %u => Server %s", key, hash_value, memcached_server_name(server_inst));
+               "Key %s => Hash %u => Server %s", key_w_ns, hash_value, memcached_server_name(server_inst));
 
   if (node == NULL) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
