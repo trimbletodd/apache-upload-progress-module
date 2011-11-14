@@ -5,7 +5,6 @@
 #include <apr_strings.h>
 #include "unixd.h"
 #include <libmemcached/memcached.h>
-#include <libmemcached/util/pool.h>
 
 #if APR_HAS_SHARED_MEMORY
 #include "apr_rmm.h"
@@ -955,20 +954,20 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
                  "ERROR: %s: Unable to create memcache pool.", memcached_strerror(memc, rc));
   }
 
-  /* memcached_return_t memcached_behavior_set (memcached_st *ptr, memcached_behavior flag, uint64_t data);*/
-  /* memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_HASH, MEMCACHED_HASH_CRC);  */
+  memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_HASH, MEMCACHED_HASH_CRC);
+  /* memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_HASH, MEMCACHED_HASH_MD5); */
 
   /* Import to note that the memcache-client gem uses the "namespace:key" to assign memcache server */
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
                "Memcache using hash algorithm: %s", libmemcached_string_hash(memcached_behavior_get(memc,MEMCACHED_BEHAVIOR_HASH)));
-  /* memcached_hash_t memcached_behavior_get_distribution_hash(memcached_st *ptr) */
+  /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,  */
+  /*              "Memcache using distribution algorithm: %s", libmemcached_string_distribution(memcached_behavior_get_distribution_hash(memc))); */
+
+  uint32_t hash_value = memcached_generate_hash_value(key, strlen(key), MEMCACHED_HASH_CRC);
+  uint32_t server_key = memcached_generate_hash(memc, key, strlen(key));
+  memcached_server_instance_st server_inst = memcached_server_instance_by_position(memc, server_key);
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
-               "Memcache using distribution algorithm: %s", libmemcached_string_distribution(memcached_behavior_get_distribution_hash(memc)));
-  uint32_t server_key = memcached_generate_hash(memc, upload_id, strlen(upload_id));
-  memcached_server_instance_st *server_inst = memcached_server_instance_by_position(ptr, server_key);
-/* const char *memcached_server_name(const memcached_server_instance_st self) */
-  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
-               "Key %u => Server %s", server_key,memcached_server_name(server_inst));
+               "Key %s => Hash %u => Server %s", key, hash_value, memcached_server_name(server_inst));
 
   if (node == NULL) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
