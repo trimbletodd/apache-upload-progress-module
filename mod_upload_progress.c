@@ -882,13 +882,14 @@ static const char *memcache_track_upload_progress_cmd(cmd_parms *cmd, void *dumm
  */
 static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *arg) {
     ServerConfig *config = (ServerConfig*)ap_get_module_config(cmd->server->module_config, &upload_progress_module);
-    char conn_string[1024];
+    /* char conn_string[1024]; */
     config->memcache_server_file = arg;
-
     if (!file_exists(config->memcache_server_file)){
       config->memcache_conn_str = apr_psprintf(cmd->pool, "%s", "--SERVER=localhost:11211");
     }else{
       char *command = apr_psprintf(cmd->pool, "ruby -e \'require \"%s\"; puts MEMCACHED_SERVERS.map{|h| \"--SERVER=#{h}\"}.join(\" \")\' 2> /dev/null", config->memcache_server_file);
+
+      char *additional_options = apr_psprintf(cmd->pool, " --HASH=CRC");
       FILE *fp = popen(command, "r");
       if (fp == NULL) {
         printf("Unable to retreive MEMCACHED_SERVERS variable from file %s (CMD: %s)", config->memcache_server_file, command);
@@ -945,19 +946,29 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
 
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
 
-  // This is only a single instance of memcache.  Need a pool.
-  //  memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
+  /* memcached_pool_st* pool= memcached_pool(config->memcache_conn_str, strlen(config->memcache_conn_str)); */
+  /* memcached_st *memc= memcached_pool_pop(pool, false, &rc); */
+  memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
 
-  memcached_pool_st* pool= memcached_pool(config->memcache_conn_str, strlen(config->memcache_conn_str));
-
-  memcached_st *memc= memcached_pool_pop(pool, false, &rc);
   if (rc != MEMCACHED_SUCCESS){
     ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
                  "ERROR: %s: Unable to create memcache pool.", memcached_strerror(memc, rc));
   }
 
-  /* char *conn_string = "--SERVER=localhost:11211"; */
-  /* memcached_st *memc=memcached(conn_string, strlen(conn_string)); */
+  /* memcached_return_t memcached_behavior_set (memcached_st *ptr, memcached_behavior flag, uint64_t data);*/
+  /* memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_HASH, MEMCACHED_HASH_CRC);  */
+
+  /* Import to note that the memcache-client gem uses the "namespace:key" to assign memcache server */
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
+               "Memcache using hash algorithm: %s", libmemcached_string_hash(memcached_behavior_get(memc,MEMCACHED_BEHAVIOR_HASH)));
+  /* memcached_hash_t memcached_behavior_get_distribution_hash(memcached_st *ptr) */
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
+               "Memcache using distribution algorithm: %s", libmemcached_string_distribution(memcached_behavior_get_distribution_hash(memc)));
+  uint32_t server_key = memcached_generate_hash(memc, upload_id, strlen(upload_id));
+  memcached_server_instance_st *server_inst = memcached_server_instance_by_position(ptr, server_key);
+/* const char *memcached_server_name(const memcached_server_instance_st self) */
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
+               "Key %u => Server %s", server_key,memcached_server_name(server_inst));
 
   if (node == NULL) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
