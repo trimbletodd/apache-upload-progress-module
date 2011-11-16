@@ -919,7 +919,7 @@ static const char* memcache_server_file_cmd(cmd_parms *cmd, void *dummy, char *a
       
     /* config->memcache_conn_str = apr_psprintf(cmd->pool, "lkjlkjlkj"); */
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, cmd->server, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, cmd->server, "server file: %s; memcache conn string: %s", config->memcache_server_file, config->memcache_conn_str);
     return NULL;
 }
 
@@ -945,23 +945,26 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
 
   ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
 
-  /* memcached_pool_st* pool= memcached_pool(config->memcache_conn_str, strlen(config->memcache_conn_str)); */
-  /* memcached_st *memc= memcached_pool_pop(pool, false, &rc); */
   memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
-
   if (rc != MEMCACHED_SUCCESS){
     ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
-                 "ERROR: %s: Unable to create memcache pool.", memcached_strerror(memc, rc));
+                 "ERROR: %s: Unable to create memcache instance.", memcached_strerror(memc, rc));
   }
 
   memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_HASH, MEMCACHED_HASH_CRC);
-  /* memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_HASH, MEMCACHED_HASH_MD5); */
 
-  /* Import to note that the memcache-client gem uses the "namespace:key" to assign memcache server */
-  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
-               "Memcache using hash algorithm: %s", libmemcached_string_hash(memcached_behavior_get(memc,MEMCACHED_BEHAVIOR_HASH)));
+  /* Important to note that the memcache-client gem uses the "namespace:key" by default
+     to assign memcache server. */
+  /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,  */
+  /*              "Memcache using hash algorithm: %s", libmemcached_string_hash(memcached_behavior_get(memc,MEMCACHED_BEHAVIOR_HASH))); */
   /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,  */
   /*              "Memcache using distribution algorithm: %s", libmemcached_string_distribution(memcached_behavior_get_distribution_hash(memc))); */
+
+  int i=0;
+  for(i=0; i<10; i+=200){
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+                 "%i -> %s", i, memcached_server_name(memcached_server_instance_by_position(memc, (uint32_t) 100)));
+  }
 
   uint32_t hash_value = memcached_generate_hash_value(key_w_ns, strlen(key_w_ns), MEMCACHED_HASH_CRC);
   uint32_t server_key = memcached_generate_hash(memc, key_w_ns, strlen(key_w_ns));
@@ -988,17 +991,6 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
                  "ERROR: %s: Unable to set key %s -> %s\n", memcached_strerror(memc, rc), key_w_ns, json_str);
   }
 
-
-  /*
-    Release the memc_ptr that was pulled from the pool
-  */
-  /* memcached_pool_push(pool, memc); */
-
-  /*
-    Destroy the pool.
-  */
-  /* memcached_pool_destroy(pool); */
-
   memcached_free(memc);
 }
 
@@ -1010,4 +1002,3 @@ static bool file_exists(const char *filename){
   }
   return false;
 }
-
