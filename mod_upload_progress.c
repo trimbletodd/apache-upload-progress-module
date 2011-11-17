@@ -933,6 +933,15 @@ static const char* memcache_namespace_cmd(cmd_parms *cmd, void *dummy, char *arg
     return NULL;
 }
 
+
+struct memcached_continuum_item_st
+{
+  uint32_t index;
+  uint32_t value;
+};
+  
+typedef struct memcached_continuum_item_st memcached_continuum_item_st;
+
 /*
  * updates memcache key with the JSON from the node
  */
@@ -943,34 +952,183 @@ static void memcache_update_progress(const char *key, upload_progress_node_t *no
   char *json_str;
   char *key_w_ns = apr_psprintf(r->pool, "%s%s", config->memcache_namespace,key);
 
-  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "server file: %s; memcache conn string: %s\n", config->memcache_server_file, config->memcache_conn_str);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "server file: %s; memcache conn string: %s", config->memcache_server_file, config->memcache_conn_str);
 
   memcached_st *memc=memcached(config->memcache_conn_str, strlen(config->memcache_conn_str));
+  rc=memcached_version(memc);
   if (rc != MEMCACHED_SUCCESS){
     ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, 
                  "ERROR: %s: Unable to create memcache instance.", memcached_strerror(memc, rc));
   }
-
+  
   memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_HASH, MEMCACHED_HASH_CRC);
+  memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_KETAMA_HASH, MEMCACHED_HASH_CRC);
+  memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_DISTRIBUTION, MEMCACHED_DISTRIBUTION_CONSISTENT_KETAMA);
+  
 
   /* Important to note that the memcache-client gem uses the "namespace:key" by default
      to assign memcache server. */
-  /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,  */
-  /*              "Memcache using hash algorithm: %s", libmemcached_string_hash(memcached_behavior_get(memc,MEMCACHED_BEHAVIOR_HASH))); */
-  /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,  */
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_BEHAVIOR_HASH: %s", libmemcached_string_hash(memcached_behavior_get(memc,MEMCACHED_BEHAVIOR_HASH)));
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_BEHAVIOR_KETAMA_HASH: %s", libmemcached_string_hash(memcached_behavior_get(memc,MEMCACHED_BEHAVIOR_KETAMA_HASH)));
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_BEHAVIOR_KETAMA: %i", memcached_behavior_get(memc, MEMCACHED_BEHAVIOR_KETAMA));
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_BEHAVIOR_DISTRIBUTION: %s", libmemcached_string_hash(memcached_behavior_get(memc, MEMCACHED_BEHAVIOR_DISTRIBUTION)));
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_BEHAVIOR_SORT_HOSTS: %s", libmemcached_string_hash(memcached_behavior_get(memc, MEMCACHED_BEHAVIOR_SORT_HOSTS)));
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_BEHAVIOR_HASH_WITH_PREFIX_KEY: %s", libmemcached_string_hash(memcached_behavior_get(memc, MEMCACHED_BEHAVIOR_HASH_WITH_PREFIX_KEY)));
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "memc->flags.use_sort_hosts: %i", memc->flags.use_sort_hosts);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,"Memcache using distribution algorithm: %s(%u)\n", libmemcached_string_distribution(memcached_behavior_get_distribution_hash(memc)), memc->distribution);
+
+  memcached_server_st *list= memc->servers;
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "memc->flags.auto_eject_hosts = %i\n", memc->flags.auto_eject_hosts);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "memc->ketama.continuum_count = %i\n", memc->ketama.continuum_count);
+
+  /* ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, */
   /*              "Memcache using distribution algorithm: %s", libmemcached_string_distribution(memcached_behavior_get_distribution_hash(memc))); */
 
-  int i=0;
-  for(i=0; i<10; i+=200){
+  uint32_t live_servers= live_servers= memcached_server_count(memc);
+  uint64_t is_ketama_weighted= memcached_behavior_get(memc, MEMCACHED_BEHAVIOR_KETAMA_WEIGHTED);
+  uint32_t points_per_server= (uint32_t) (is_ketama_weighted ? MEMCACHED_POINTS_PER_SERVER_KETAMA : MEMCACHED_POINTS_PER_SERVER);
+
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "live_servers = %i;",live_servers);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "is_ketama_weighted = %lu;",is_ketama_weighted);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "points_per_server = %i;",points_per_server);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_DEFAULT_PORT = %i",MEMCACHED_DEFAULT_PORT);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "memc->flags.hash_with_namespace = %i",memc->flags.hash_with_namespace);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "memc->distribution = %i",memc->distribution);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "memc->ketama.continuum_points_counter = %u",memc->ketama.continuum_points_counter);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_DISTRIBUTION_CONSISTENT_MAX = %u\n", MEMCACHED_DISTRIBUTION_CONSISTENT_MAX);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "MEMCACHED_DISTRIBUTION_CONSISTENT_WEIGHTED = %u\n", MEMCACHED_DISTRIBUTION_CONSISTENT_WEIGHTED);
+
+/* mod_upload_progress.c:1001: error: invalid use of undefined type ‘struct memcached_continuum_item_st’ */
+/* mod_upload_progress.c:1001: warning: initialization from incompatible pointer type */
+
+  int server_count = memcached_server_count(memc);
+  int i;
+  for (i=0; i<server_count; i++){
     ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
-                 "%i -> %s", i, memcached_server_name(memcached_server_instance_by_position(memc, (uint32_t) 100)));
+                 "memcached_server[%i].hostname = %s ", i, memcached_server_name(memcached_server_instance_by_position(memc, i)));
   }
 
-  uint32_t hash_value = memcached_generate_hash_value(key_w_ns, strlen(key_w_ns), MEMCACHED_HASH_CRC);
-  uint32_t server_key = memcached_generate_hash(memc, key_w_ns, strlen(key_w_ns));
+  char tmp_key[]="azf";
+  uint32_t hash_value = memcached_generate_hash_value(tmp_key, strlen(tmp_key), MEMCACHED_HASH_CRC);
+  uint32_t server_key = memcached_generate_hash(memc, tmp_key, strlen(tmp_key));
+  uint32_t server_key_w_redist = memcached_generate_hash_with_redistribution(memc, tmp_key, strlen(tmp_key));
   memcached_server_instance_st server_inst = memcached_server_instance_by_position(memc, server_key);
-  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, 
-               "Key %s => Hash %u => Server %s", key_w_ns, hash_value, memcached_server_name(server_inst));
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", tmp_key, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
+
+  // logging the continuum binary search
+  uint32_t num= memc->ketama.continuum_points_counter;
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "num = %u\n", num);
+  memcached_continuum_item_st *left = memc->ketama.continuum;
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "left = %u; left->value = %u", left, left->value);
+  memcached_continuum_item_st *right = memc->ketama.continuum+num;
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "right = %u; right->value = %u", right, right->value);
+  i=0;
+  memcached_continuum_item_st *val = memc->ketama.continuum+i;
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "continuum[%i]->value = %u\n", i, val->value);
+
+  for(i=1; i<10; i+=1){
+    val = memc->ketama.continuum+i;
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+                 "continuum[%i]->value = %u\n", i, val->value);
+  }
+
+  for(i=290; i<310; i+=1){
+    val = memc->ketama.continuum+i;
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+                 "continuum[%i]->value = %u\n", i, val->value);
+  }
+
+  for(i=470; i<490; i+=1){
+    val = memc->ketama.continuum+i;
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+                 "continuum[%i]->value = %u\n", i, val->value);
+  }
+
+  tmp_key[1]='d';
+  hash_value = memcached_generate_hash_value(tmp_key, strlen(tmp_key), MEMCACHED_HASH_CRC);
+  server_key = memcached_generate_hash(memc, tmp_key, strlen(tmp_key));
+  server_key_w_redist = memcached_generate_hash_with_redistribution(memc, tmp_key, strlen(tmp_key));
+  server_inst = memcached_server_instance_by_position(memc, server_key);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", tmp_key, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
+
+  tmp_key[1]='x';
+  hash_value = memcached_generate_hash_value(tmp_key, strlen(tmp_key), MEMCACHED_HASH_CRC);
+  server_key = memcached_generate_hash(memc, tmp_key, strlen(tmp_key));
+  server_key_w_redist = memcached_generate_hash_with_redistribution(memc, tmp_key, strlen(tmp_key));
+  server_inst = memcached_server_instance_by_position(memc, server_key);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", tmp_key, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
+
+  tmp_key[0]='e';
+  hash_value = memcached_generate_hash_value(tmp_key, strlen(tmp_key), MEMCACHED_HASH_CRC);
+  server_key = memcached_generate_hash(memc, tmp_key, strlen(tmp_key));
+  server_key_w_redist = memcached_generate_hash_with_redistribution(memc, tmp_key, strlen(tmp_key));
+  server_inst = memcached_server_instance_by_position(memc, server_key);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", tmp_key, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
+
+  tmp_key[0]='s';
+  hash_value = memcached_generate_hash_value(tmp_key, strlen(tmp_key), MEMCACHED_HASH_CRC);
+  server_key = memcached_generate_hash(memc, tmp_key, strlen(tmp_key));
+  server_key_w_redist = memcached_generate_hash_with_redistribution(memc, tmp_key, strlen(tmp_key));
+  server_inst = memcached_server_instance_by_position(memc, server_key);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", tmp_key, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
+
+  tmp_key[0]='o';
+  hash_value = memcached_generate_hash_value(tmp_key, strlen(tmp_key), MEMCACHED_HASH_CRC);
+  server_key = memcached_generate_hash(memc, tmp_key, strlen(tmp_key));
+  server_key_w_redist = memcached_generate_hash_with_redistribution(memc, tmp_key, strlen(tmp_key));
+  server_inst = memcached_server_instance_by_position(memc, server_key);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", tmp_key, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
+
+  tmp_key[2]='b';
+  hash_value = memcached_generate_hash_value(tmp_key, strlen(tmp_key), MEMCACHED_HASH_CRC);
+  server_key = memcached_generate_hash(memc, tmp_key, strlen(tmp_key));
+  server_key_w_redist = memcached_generate_hash_with_redistribution(memc, tmp_key, strlen(tmp_key));
+  server_inst = memcached_server_instance_by_position(memc, server_key);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", tmp_key, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
+
+  tmp_key[2]='t';
+  hash_value = memcached_generate_hash_value(tmp_key, strlen(tmp_key), MEMCACHED_HASH_CRC);
+  server_key = memcached_generate_hash(memc, tmp_key, strlen(tmp_key));
+  server_key_w_redist = memcached_generate_hash_with_redistribution(memc, tmp_key, strlen(tmp_key));
+  server_inst = memcached_server_instance_by_position(memc, server_key);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", tmp_key, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
+
+  hash_value = memcached_generate_hash_value(key_w_ns, strlen(key_w_ns), MEMCACHED_HASH_CRC);
+  server_key = memcached_generate_hash(memc, key_w_ns, strlen(key_w_ns));
+  server_key_w_redist = memcached_generate_hash_with_redistribution(memc, key_w_ns, strlen(key_w_ns));
+  server_inst = memcached_server_instance_by_position(memc, server_key);
+  ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s,
+               "Key %s => Hash %u => Server Key => %u Server Key_w_Redist %u => Server %s", key_w_ns, hash_value, server_key, server_key_w_redist, memcached_server_name(server_inst));
 
   if (node == NULL) {
     json_str = apr_psprintf(r->pool, "{ \"state\" : \"starting\" }");
